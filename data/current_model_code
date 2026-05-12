@@ -1,0 +1,244 @@
+---
+title: "NBA DRAFT"
+author: "Krishna Rao"
+date: "2026-03-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(cbbdata)
+library(tidyverse)
+library(janitor)
+library(psych)
+library(writexl)
+```
+
+```{r login}
+cbbdata::cbd_login()
+```
+
+```{r conf-helper}
+power_confs <- c("SEC", "B12", "B10", "BE")
+
+add_features <- function(df) {
+  df |>
+    mutate(
+      conf_str = ifelse(conf %in% power_confs | team == "Duke", 10, 5),
+      youth    = -est_age
+    )
+}
+
+# Convert numeric inches -> formatted height string like 6' 3" or 6' 3.5"
+format_height <- function(in_decimal) {
+  if (is.na(in_decimal)) return(NA_character_)
+  ft <- floor(in_decimal / 12)
+  inches <- in_decimal - ft * 12
+  # Drop trailing zeros: 3.00 -> "3", 3.50 -> "3.5", 3.75 -> "3.75"
+  inches_str <- sub("\\.?0+$", "", sprintf("%.2f", inches))
+  paste0(ft, "' ", inches_str, '"')
+}
+format_height <- Vectorize(format_height, USE.NAMES = FALSE)
+```
+
+```{r pull-2026}
+prospects_2026 <- read_csv(
+  "https://raw.githubusercontent.com/KrishnaRao1/nba_draft_model_2026/main/data/prospects_2026",
+  show_col_types = FALSE
+) |>
+  mutate(
+    height_in = as.numeric(str_split_i(height, "-", 1)) * 12 +
+                as.numeric(str_split_i(height, "-", 2)),
+    est_age = case_when(
+      exp == "Fr" ~ 18,
+      exp == "So" ~ 19,
+      exp == "Jr" ~ 20,
+      exp == "Sr" ~ 21,
+      exp == "Gr" ~ 22,
+      TRUE        ~ NA_real_
+    )
+  ) |>
+  select(-exp, -height) |>
+  relocate(height_in, est_age, .after = player) |>
+  add_features()
+```
+
+```{r combine-merge}
+combine_url <- "https://raw.githubusercontent.com/KrishnaRao1/nba_draft_model_2026/main/data/combine_measurements"
+
+combine <- read_csv(combine_url, show_col_types = FALSE) |>
+  select(player        = Player,
+         combine_ht_in = `Height (in)`,
+         combine_wt    = `Weight (lbs)`,
+         combine_ws_in = `Wingspan (in)`,
+         combine_reach = `Reach (in)`)
+
+# Keep all prospects; override height_in with combine when available.
+# Original CSV height kept as height_listed_in for reference.
+prospects_2026 <- prospects_2026 |>
+  rename(height_listed_in = height_in) |>
+  left_join(combine, by = "player") |>
+  mutate(
+    height_in   = coalesce(combine_ht_in, height_listed_in),
+    wingspan_in = combine_ws_in,
+    reach_in    = combine_reach,
+    weight_lbs  = combine_wt,
+    has_combine = !is.na(combine_ht_in)
+  ) |>
+  select(-combine_ht_in, -combine_ws_in, -combine_reach, -combine_wt)
+
+message("Combine matches: ", sum(prospects_2026$has_combine),
+        " / ", nrow(prospects_2026))
+```
+
+```{r historical-pull}
+top100_by_year <- map(2015:2025, function(yr) {
+  message("Processing year: ", yr)
+  cbd_torvik_player_season(year = yr) |>
+    filter(g >= 15, mpg >= 10) |>
+    arrange(desc(bpm)) |>
+    slice_head(n = 100) |>
+    mutate(
+      draft_year = yr,
+      est_age = case_when(
+        exp == "Fr" ~ 18,
+        exp == "So" ~ 19,
+        exp == "Jr" ~ 20,
+        exp == "Sr" ~ 21,
+        exp == "Gr" ~ 22,
+        TRUE        ~ NA_real_
+      ),
+      across(c(mpg, ppg, rpg, apg, spg, bpg,
+               fg_pct, three_pct, ft_pct, ts,
+               usg, ortg, obpm, dbpm, bpm), ~ round(.x, 1))
+    ) |>
+    select(draft_year, player, pos, est_age, team, conf, g, mpg,
+           ppg, rpg, apg, spg, bpg,
+           fg_pct, three_pct, ft_pct, ts, usg, ortg, obpm, dbpm, bpm)
+})
+
+all_prospects <- bind_rows(top100_by_year) |>
+  arrange(desc(draft_year)) |>
+  distinct(player, .keep_all = TRUE) |>
+  filter(!player %in% prospects_2026$player) |>
+  add_features()
+```
+
+```{r energy-model}
+score_energy_simple <- function(df) {
+  df |>
+    mutate(across(c(bpm, ortg, usg, ts, conf_str, youth), ~ as.numeric(.))) |>
+    transmute(
+      energy = round(
+        0.10 * scale(bpm)[,1] +
+        0.15 * scale(ortg)[,1] +
+        0.15 * scale(usg)[,1] +
+        0.10 * scale(ts)[,1] +
+        0.25 * scale(conf_str)[,1] +
+        0.25 * scale(youth)[,1],
+        2
+      ) * sd(all_prospects$bpm, na.rm = TRUE)
+    ) |>
+    pull(energy)
+}
+
+all_prospects <- all_prospects |>
+  filter(if_all(c(bpm, ortg, usg, ts, conf_str, youth), ~ !is.na(.))) |>
+  mutate(energy = score_energy_simple(pick(everything())))
+
+prospects_2026 <- prospects_2026 |>
+  filter(if_all(c(bpm, ortg, usg, ts, conf_str, youth), ~ !is.na(.))) |>
+  mutate(energy = score_energy_simple(pick(everything())))
+```
+
+```{r pos-bucket}
+# Bucketing uses numeric height_in (combine when available, else listed)
+prospects_2026 <- prospects_2026 |>
+  mutate(
+    pos_group = case_when(
+      height_in <= 75 ~ "PG",
+      height_in <= 78 ~ "SG",
+      height_in <= 82 ~ "Wing",
+      height_in >= 83 ~ "C",
+      TRUE            ~ NA_character_
+    )
+  ) |>
+  group_by(pos_group) |>
+  arrange(desc(energy), .by_group = TRUE) |>
+  mutate(pos_rank = row_number()) |>
+  ungroup()
+```
+
+```{r format-height}
+# Add formatted height strings for display. Done AFTER bucketing so the
+# numeric height_in is still available for case_when above.
+prospects_2026 <- prospects_2026 |>
+  mutate(
+    height   = format_height(height_in),
+    wingspan = format_height(wingspan_in),
+    reach    = format_height(reach_in)
+  )
+```
+
+```{r make-pos-table}
+make_pos_table <- function(df, position) {
+  df |>
+    filter(pos_group == position) |>
+    arrange(pos_rank) |>
+    select(pos_rank, player, est_age, height, wingspan, weight_lbs,
+           team, conf, energy, bpm, ortg, ts, usg)
+}
+```
+
+```{r excel-export}
+write_xlsx(
+  list(
+    "Point Guards"    = make_pos_table(prospects_2026, "PG"),
+    "Shooting Guards" = make_pos_table(prospects_2026, "SG"),
+    "Wings"           = make_pos_table(prospects_2026, "Wing"),
+    "Centers"         = make_pos_table(prospects_2026, "C"),
+    "Overall 2026"    = prospects_2026 |>
+                          arrange(desc(energy)) |>
+                          select(player, pos_group, est_age, height, wingspan,
+                                 weight_lbs, team, conf, energy, bpm, ortg, ts, usg),
+    "Historical"      = all_prospects |>
+                          arrange(desc(energy)) |>
+                          select(draft_year, player, pos, est_age, team, conf,
+                                 energy, bpm, ortg, ts, usg)
+  ),
+  path = "/Users/krish/Desktop/nba_draft_2026_v8.xlsx"
+)
+```
+
+```{r comps}
+comps <- prospects_2026 |>
+  select(prospect      = player,
+         prospect_age  = est_age,
+         prospect_ts   = ts,
+         prospect_usg  = usg,
+         energy_2026   = energy) |>
+  rowwise() |>
+  mutate(
+    comp = list(
+      all_prospects |>
+        filter(abs(est_age - prospect_age) <= 1) |>
+        mutate(energy_diff = abs(energy - energy_2026)) |>
+        arrange(energy_diff) |>
+        slice_head(n = 1) |>
+        select(comp_player = player,
+               comp_age    = est_age,
+               comp_ts     = ts,
+               comp_usg    = usg)
+    )
+  ) |>
+  unnest(comp) |>
+  ungroup() |>
+  arrange(desc(energy_2026)) |>
+  select(prospect, prospect_age, prospect_ts, prospect_usg,
+         comp_player, comp_age, comp_ts, comp_usg)
+
+View(comps, title = "Comps")
+```
