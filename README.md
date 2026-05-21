@@ -91,3 +91,42 @@ Any draft model trying to compete with NBA front offices is starting from a defi
 ---
 
 ## Repo layout
+
+---
+
+## Reproducing
+
+```r
+# Install deps
+install.packages(c("cbbdata", "tidyverse", "janitor", "psych", "writexl"))
+
+# Get a cbbdata account at https://cbbdata.aaronyu.org/, then:
+library(cbbdata)
+cbd_login()
+
+# Knit the Rmd or run chunks top to bottom
+rmarkdown::render("nba_draft_2026.Rmd")
+```
+
+Output is a multi-sheet Excel workbook at the path defined in the `excel-export` chunk.
+
+---
+
+## Roadmap
+
+In rough priority order:
+
+1. **Historical validation** — join the historical pool against NBA career stats, compute correlation between college energy and career BPM, publish the scatter plot in this README
+2. **Top-5 comps with similarity scores and NBA outcomes** — replace the top-1 comp with a richer comp table
+3. **Defensive features** — STL%, BLK%, DREB%, height-adjusted block rate for bigs
+4. **Shot diet features** — rim rate, 3PA rate, FTr
+5. **Learned weights** — gradient-boosted model trained on NBA outcomes, compare feature importances against hand-tuned priors
+6. **Better conference adjustment** — KenPom or Torvik adjusted conference strength rather than binary power/non-power
+
+---
+
+## Acknowledgments
+
+- [Bart Torvik](https://barttorvik.com/) for the underlying college basketball data
+- [Aaron Yu](https://cbbdata.aaronyu.org/) for `cbbdata`
+- NBA.com for combine measurements
