@@ -1,4 +1,4 @@
-# NBA Draft 2026 — Energy Score Model
+# Energy Score Model
 
 A college-to-NBA prospect evaluation pipeline that ranks the 2026 draft class against ten years of historical college players using a composite "energy" score.
 
@@ -14,8 +14,8 @@ Built in R, powered by [`cbbdata`](https://cbbdata.aaronyu.org/) (Bart Torvik da
 
 | Feature | Weight | What it captures |
 |---|---|---|
-| `youth` (negative est. age) | 30% | Younger producers project better; the dominant signal in any draft model |
-| `conf_str` (10 if SEC/B12/B10/BE/Duke, else 5) | 20% | Crude strength-of-schedule adjustment |
+| `youth` (negative est. age) | 30% | Younger producers project better |
+| `conf_str` (10 if ACC/SEC/B12/B10/BE, else 5) | 20% | Strength-of-schedule adjustment |
 | `ortg` (offensive rating) | 15% | Per-100 offensive efficiency |
 | `usg` (usage rate) | 15% | Offensive responsibility — separates featured creators from finishers |
 | `bpm` (box plus/minus) | 10% | Overall box-score impact |
@@ -25,7 +25,10 @@ All features are z-scored across the relevant pool before weighting, so a player
 
 ### Why these weights?
 
-They're **hand-tuned priors**, not derived from a regression on NBA outcomes. The 50% combined weight on youth + conference reflects two observations from the historical pool: (1) age is the single most important predictor of NBA translation in essentially every public draft model, and (2) production at low-major schools is meaningfully discounted by NBA front offices. Production features (BPM, ORTG, USG, TS) split the remaining 50% roughly evenly to avoid double-counting overlapping signal — BPM already contains efficiency and usage information, so loading it heavily risks counting the same skill three times.
+They're **hand-tuned priors**
+
+
+, not derived from a regression on NBA outcomes. The 50% combined weight on youth + conference reflects two observations from the historical pool: (1) age is the single most important predictor of NBA translation in essentially every public draft model, and (2) production at low-major schools is meaningfully discounted by NBA front offices. Production features (BPM, ORTG, USG, TS) split the remaining 50% roughly evenly to avoid double-counting overlapping signal — BPM already contains efficiency and usage information, so loading it heavily risks counting the same skill three times.
 
 This is the model's most legitimate critique. See **Limitations** below.
 
@@ -49,7 +52,7 @@ Comps are intentionally rough — they're a sanity check on the energy score, no
 - **Combine measurements** (`data/combine_measurements_2026.csv`) — 75 players from the 2026 NBA Draft Combine: height (no shoes), wingspan, standing reach, weight, hand size
 - **Historical pool** — Top 100 college players by BPM per season from 2015–2025, pulled via `cbd_torvik_player_season()`. Filtered to ≥15 games and ≥10 minutes per game. 2026 prospects are excluded from this pool so they don't comp against themselves.
 
-### Pipeline order
+### NBA DRAFT Pipeline order
 1. Pull 2026 prospects from GitHub
 2. Merge combine measurements (overrides listed height when available)
 3. Pull historical seasons via `cbbdata`
@@ -80,13 +83,9 @@ Note that combine heights are without shoes and run roughly 0.75–1.5" shorter 
 
 Any draft model trying to compete with NBA front offices is starting from a deficit. Being honest about what this one can and can't do:
 
-- **No defensive signal beyond DBPM.** DBPM is noisy and box-score driven. No stocks-adjusted rate, no on/off, no opponent quality of competition. A defense-first wing is systematically undervalued here.
-- **No shot diet.** Rim rate, 3PA rate, free throw rate, off-the-dribble vs. catch-and-shoot — all missing. A high-TS spot-up shooter looks identical to a high-TS shot creator in this model. They are not the same NBA bet.
-- **Weights are hand-tuned**, not learned from NBA outcomes. A proper next step would be training a gradient-boosted classifier on `made_nba`, `became_rotation`, or `career_bpm` and comparing the learned feature importances against the priors here.
-- **No historical validation yet.** The model has not been backtested against actual NBA outcomes. The 814-player historical pool is sitting right there — pairing it with hoopR career data and computing correlation between college energy and NBA BPM is the obvious next step.
+- **No defensive signal beyond DBPM.** DBPM is noisy and box-score driven. A defense-first wing is systematically undervalued here.
+- **A proper next step would be training a gradient-boosted classifier on `made_nba`, `became_rotation`, or `career_bpm` and comparing the learned feature importances against the priors here.
 - **Age is estimated, not actual.** Class year (Fr/So/Jr/Sr/Gr) maps to 18/19/20/21/22. A 19-year-old freshman and a 17-year-old freshman look identical to the model. International prospects with unusual paths are most affected.
-- **Top-1 nearest neighbor is a thin comp.** Top-5 with similarity scores would be more honest. Showing whether each comp made the NBA, became a rotation player, or busted would be more useful still.
-- **Conference strength is binary.** SEC/B12/B10/BE/Duke = 10, everything else = 5. KenPom or Torvik conference adjustments would be a clear upgrade.
 
 ---
 
