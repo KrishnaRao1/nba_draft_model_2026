@@ -54,14 +54,6 @@ Because a transfer's stats were earned at their **old** school, `conf_str` is ke
 7. Generate Excel workbook with per-position tabs + overall + historical sheets
 8. Generate top-1 comp table
 
-### Transfer portal pipeline order
-1. Pull the historical seasons once (reused for the conference lookup and BPM-scaling constant)
-2. Load the **signed** transfers and the **unsigned** portal from the repo (same schema, shared loader)
-3. Attach each player's `old_team` conference, then build `conf_str` + `youth`
-4. **Drop anyone already signed from the unsigned board** — so the available list only shows players a staff can still pursue
-5. Compute energy scores (each set z-scored within itself)
-6. Bucket by height and rank within position, then overall
-7. Generate one Excel workbook with a **Signed Transfers** sheet followed by an **Available Portal** sheet
 
 ---
 
